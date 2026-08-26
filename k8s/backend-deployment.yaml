@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
         - name: backend
-          image: ghcr.io/tejalkunde/devops-task-manager-backend:d18eee6e5c357ac64a9a561ad42b1922856dd7e2
+          image: ghcr.io/tejalkunde/devops-task-manager-backend:db0c07c3fd1cf6e7056f0acb51939cb37c6ad494
           ports:
             - containerPort: 5000
           env:
