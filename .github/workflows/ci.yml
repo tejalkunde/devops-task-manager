@@ -11,45 +11,31 @@ permissions:
   packages: write
 
 jobs:
-
-  detect-changes:
-
-    runs-on: ubuntu-latest
-
-    outputs:
-      backend: ${{ steps.filter.outputs.backend }}
-      frontend: ${{ steps.filter.outputs.frontend }}
-
-    steps:
-
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Detect changed files
-        id: filter
-        uses: dorny/paths-filter@v3
-        with:
-          filters: |
-            backend:
-              - 'backend/**'
-
-            frontend:
-              - 'frontend/**'
-
-
-  build-backend:
-
-    needs: detect-changes
-    if: needs.detect-changes.outputs.backend == 'true'
-
+  build-and-push:
     runs-on: ubuntu-latest
 
     steps:
-
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 2
+
+      - name: Detect changes
+        id: changes
+        shell: bash
+        run: |
+          if git diff --name-only HEAD^ HEAD | grep -q '^backend/'; then
+            echo "backend=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "backend=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          if git diff --name-only HEAD^ HEAD | grep -q '^frontend/'; then
+            echo "frontend=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "frontend=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Login to GHCR
         uses: docker/login-action@v3
@@ -59,6 +45,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and Push Backend
+        if: steps.changes.outputs.backend == 'true'
         uses: docker/build-push-action@v6
         with:
           context: ./backend
@@ -67,48 +54,8 @@ jobs:
             ghcr.io/tejalkunde/devops-task-manager-backend:${{ github.sha }}
             ghcr.io/tejalkunde/devops-task-manager-backend:latest
 
-      - name: Update Backend Kubernetes image
-        shell: bash
-        run: |
-          sed -i "s|ghcr.io/tejalkunde/devops-task-manager-backend:.*|ghcr.io/tejalkunde/devops-task-manager-backend:${{ github.sha }}|" k8s/backend-deployment.yaml
-
-      - name: Commit Backend Kubernetes manifest
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-          git add k8s/backend-deployment.yaml
-
-          if git diff --cached --quiet; then
-            echo "No backend manifest changes"
-          else
-            git commit -m "Update backend image tag to ${{ github.sha }} [skip ci]"
-            git push
-          fi
-
-
-  build-frontend:
-
-    needs: detect-changes
-    if: needs.detect-changes.outputs.frontend == 'true'
-
-    runs-on: ubuntu-latest
-
-    steps:
-
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Login to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Build and Push Frontend
+        if: steps.changes.outputs.frontend == 'true'
         uses: docker/build-push-action@v6
         with:
           context: ./frontend
@@ -117,22 +64,30 @@ jobs:
             ghcr.io/tejalkunde/devops-task-manager-frontend:${{ github.sha }}
             ghcr.io/tejalkunde/devops-task-manager-frontend:latest
 
+      - name: Update Backend Kubernetes image
+        if: steps.changes.outputs.backend == 'true'
+        shell: bash
+        run: |
+          sed -i "s|ghcr.io/tejalkunde/devops-task-manager-backend:.*|ghcr.io/tejalkunde/devops-task-manager-backend:${{ github.sha }}|" k8s/backend-deployment.yaml
+
       - name: Update Frontend Kubernetes image
+        if: steps.changes.outputs.frontend == 'true'
         shell: bash
         run: |
           sed -i "s|ghcr.io/tejalkunde/devops-task-manager-frontend:.*|ghcr.io/tejalkunde/devops-task-manager-frontend:${{ github.sha }}|" k8s/frontend-deployment.yaml
 
-      - name: Commit Frontend Kubernetes manifest
+      - name: Commit Kubernetes manifest changes
+        shell: bash
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          git add k8s/frontend-deployment.yaml
+          git add k8s/backend-deployment.yaml k8s/frontend-deployment.yaml
 
           if git diff --cached --quiet; then
-            echo "No frontend manifest changes"
+            echo "No manifest changes"
           else
-            git commit -m "Update frontend image tag to ${{ github.sha }} [skip ci]"
+            git commit -m "Update image tags to ${{ github.sha }} [skip ci]"
             git push
           fi
 ```
